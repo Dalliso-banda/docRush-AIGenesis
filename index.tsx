@@ -112,6 +112,14 @@ const styles: { [key: string]: React.CSSProperties } = {
         paddingRight: '20px',
         overflowY: 'auto'
     },
+    searchInput: {
+        width: '100%',
+        padding: '8px',
+        marginBottom: '10px',
+        borderRadius: 'var(--border-radius)',
+        border: '1px solid #ccc',
+        boxSizing: 'border-box',
+    },
     reportListItem: {
         padding: '10px',
         cursor: 'pointer',
@@ -243,6 +251,26 @@ const styles: { [key: string]: React.CSSProperties } = {
         display: 'flex',
         gap: '20px',
     },
+    groundingContainer: {
+        marginTop: '10px',
+        padding: '10px',
+        backgroundColor: '#f8f9fa',
+        borderRadius: 'var(--border-radius)',
+        border: '1px solid #dee2e6',
+    },
+    groundingList: {
+        listStyle: 'none',
+        padding: 0,
+        margin: 0,
+    },
+    groundingListItem: {
+        marginBottom: '5px',
+    },
+    groundingLink: {
+        textDecoration: 'none',
+        color: 'var(--primary-color)',
+        fontWeight: '500',
+    },
 };
 
 // --- Components ---
@@ -268,10 +296,13 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
     const [triageMode, setTriageMode] = useState('start'); // 'start', 'audio', 'chat'
     const [transcript, setTranscript] = useState([]);
     const [isLoading, setIsLoading] = useState(false); // For final report generation
+    const [userLocation, setUserLocation] = useState(null);
+    const [locationError, setLocationError] = useState('');
 
     // Audio state and refs
     const [isSessionActive, setIsSessionActive] = useState(false);
     const [statusText, setStatusText] = useState('Click below to start your triage conversation.');
+    const [micVolume, setMicVolume] = useState(0);
     const sessionPromiseRef = useRef<Promise<any> | null>(null);
     const outputAudioContextRef = useRef<AudioContext | null>(null);
     const nextStartTimeRef = useRef(0);
@@ -279,6 +310,9 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
     const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
     const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
+    const analyserRef = useRef<AnalyserNode | null>(null);
+    const animationFrameIdRef = useRef<number | null>(null);
+
 
     // Chat state and refs
     const chatSessionRef = useRef<Chat | null>(null);
@@ -295,6 +329,26 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
     useEffect(() => {
         scrollToBottom();
     }, [transcript]);
+    
+    useEffect(() => {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    setUserLocation({
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                    });
+                    setLocationError('');
+                },
+                (error) => {
+                    console.error("Geolocation error:", error);
+                    setLocationError('Could not get your location. Nearby search will be less accurate.');
+                }
+            );
+        } else {
+             setLocationError('Geolocation is not supported by this browser.');
+        }
+    }, []);
 
 
     // Common triage function declaration
@@ -325,6 +379,10 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
 
     // --- Audio Triage Logic ---
     const audioCleanup = useCallback(() => {
+        if (animationFrameIdRef.current) {
+            cancelAnimationFrame(animationFrameIdRef.current);
+            animationFrameIdRef.current = null;
+        }
         if (sessionPromiseRef.current) {
             sessionPromiseRef.current.then(session => session.close());
             sessionPromiseRef.current = null;
@@ -332,6 +390,10 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
         if (scriptProcessorRef.current) {
             scriptProcessorRef.current.disconnect();
             scriptProcessorRef.current = null;
+        }
+        if (analyserRef.current) {
+            analyserRef.current.disconnect();
+            analyserRef.current = null;
         }
         if (mediaStreamSourceRef.current) {
             mediaStreamSourceRef.current.disconnect();
@@ -370,6 +432,29 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
             outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
             nextStartTimeRef.current = 0;
             
+            const config: any = {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
+                systemInstruction: `You are Doc Rush, an AI medical triage agent. Your goal is to conduct a friendly, conversational interview with the patient to gather information about their symptoms.
+                1. Start by warmly greeting the patient and asking them to describe what's troubling them.
+                2. Listen carefully and ask relevant follow-up questions to understand the situation fully (e.g., "How long has this been happening?", "Can you describe the pain?").
+                3. Be empathetic and reassuring throughout the conversation.
+                4. You can also help users find nearby clinics or pharmacies using your mapping tools.
+                5. Once you have gathered sufficient information (chief complaint, symptoms, duration, severity), inform the patient you have everything you need.
+                6. Then, call the 'submitTriageReport' function with all the collected information, formatted according to the schema. Do not ask the user for a Triage ID, generate it yourself.`,
+                inputAudioTranscription: {},
+                outputAudioTranscription: {},
+                tools: [{ functionDeclarations: [submitTriageReportFunctionDeclaration] }, { googleMaps: {} }],
+            };
+    
+            if (userLocation) {
+                config.toolConfig = {
+                  retrievalConfig: {
+                    latLng: userLocation,
+                  },
+                };
+            }
+
             sessionPromiseRef.current = ai.live.connect({
                 model: 'gemini-2.5-flash-native-audio-preview-09-2025',
                 callbacks: {
@@ -392,6 +477,31 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                         };
                         mediaStreamSourceRef.current.connect(scriptProcessorRef.current);
                         scriptProcessorRef.current.connect(inputAudioContextRef.current.destination);
+
+                        analyserRef.current = inputAudioContextRef.current.createAnalyser();
+                        analyserRef.current.fftSize = 512;
+                        mediaStreamSourceRef.current.connect(analyserRef.current);
+
+                        const visualize = () => {
+                            if (!analyserRef.current) {
+                                return;
+                            }
+                            const bufferLength = analyserRef.current.frequencyBinCount;
+                            const dataArray = new Uint8Array(bufferLength);
+                            analyserRef.current.getByteTimeDomainData(dataArray);
+
+                            let sumSquares = 0.0;
+                            for (let i = 0; i < bufferLength; i++) {
+                                const normSample = (dataArray[i] / 128.0) - 1.0;
+                                sumSquares += normSample * normSample;
+                            }
+                            const rms = Math.sqrt(sumSquares / bufferLength);
+                            setMicVolume(rms);
+
+                            animationFrameIdRef.current = requestAnimationFrame(visualize);
+                        };
+                        visualize();
+
                     },
                     onmessage: async (message: LiveServerMessage) => {
                         if (message.serverContent?.inputTranscription) {
@@ -439,19 +549,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                         if(!isLoading) audioCleanup();
                     },
                 },
-                config: {
-                    responseModalities: [Modality.AUDIO],
-                    speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
-                    systemInstruction: `You are Doc Rush, an AI medical triage agent. Your goal is to conduct a friendly, conversational interview with the patient to gather information about their symptoms.
-                    1. Start by warmly greeting the patient and asking them to describe what's troubling them.
-                    2. Listen carefully and ask relevant follow-up questions to understand the situation fully (e.g., "How long has this been happening?", "Can you describe the pain?").
-                    3. Be empathetic and reassuring throughout the conversation.
-                    4. Once you have gathered sufficient information (chief complaint, symptoms, duration, severity), inform the patient you have everything you need.
-                    5. Then, call the 'submitTriageReport' function with all the collected information, formatted according to the schema. Do not ask the user for a Triage ID, generate it yourself.`,
-                    inputAudioTranscription: {},
-                    outputAudioTranscription: {},
-                    tools: [{ functionDeclarations: [submitTriageReportFunctionDeclaration] }],
-                },
+                config: config,
             });
 
         } catch (err) {
@@ -467,18 +565,31 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
         setTranscript([]);
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            
+            const config: any = {
+                systemInstruction: `You are Doc Rush, an AI medical triage agent. Your goal is to conduct a friendly, text-based chat interview with the patient to gather information about their symptoms. The patient may also upload images of their condition.
+                1. Start by warmly greeting the patient and asking them to describe what's troubling them.
+                2. Listen carefully (read their text) and ask relevant follow-up questions to understand the situation fully (e.g., "How long has this been happening?", "Can you describe the pain?"). If they upload an image, analyze it and ask clarifying questions.
+                3. Be empathetic and reassuring throughout the conversation.
+                4. You can also help users find nearby clinics or pharmacies using your mapping tools. When you do, the system will display links for the user.
+                5. Once you have gathered sufficient information (chief complaint, symptoms, duration, severity), inform the patient you have everything you need.
+                6. Then, call the 'submitTriageReport' function with all the collected information, formatted according to the schema. Do not ask the user for a Triage ID, generate it yourself.`,
+                tools: [{ functionDeclarations: [submitTriageReportFunctionDeclaration] }, { googleMaps: {} }],
+            };
+
+            if (userLocation) {
+                config.toolConfig = {
+                    retrievalConfig: {
+                        latLng: userLocation,
+                    },
+                };
+            }
+            
             chatSessionRef.current = ai.chats.create({
                 model: 'gemini-2.5-flash',
-                config: {
-                    systemInstruction: `You are Doc Rush, an AI medical triage agent. Your goal is to conduct a friendly, text-based chat interview with the patient to gather information about their symptoms. The patient may also upload images of their condition.
-                    1. Start by warmly greeting the patient and asking them to describe what's troubling them.
-                    2. Listen carefully (read their text) and ask relevant follow-up questions to understand the situation fully (e.g., "How long has this been happening?", "Can you describe the pain?"). If they upload an image, analyze it and ask clarifying questions.
-                    3. Be empathetic and reassuring throughout the conversation.
-                    4. Once you have gathered sufficient information (chief complaint, symptoms, duration, severity), inform the patient you have everything you need.
-                    5. Then, call the 'submitTriageReport' function with all the collected information, formatted according to the schema. Do not ask the user for a Triage ID, generate it yourself.`,
-                    tools: [{ functionDeclarations: [submitTriageReportFunctionDeclaration] }],
-                }
+                config: config,
             });
+
             // Start the conversation with a greeting
             const response = await chatSessionRef.current.sendMessage({ message: 'Hello' });
             setTranscript([{ speaker: 'ai', text: response.text }]);
@@ -488,7 +599,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
         } finally {
             setIsChatLoading(false);
         }
-    }, [submitTriageReportFunctionDeclaration]);
+    }, [submitTriageReportFunctionDeclaration, userLocation]);
 
     useEffect(() => {
         if (triageMode === 'chat' && !chatSessionRef.current) {
@@ -537,7 +648,11 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                     }
                 }
             }
-            setTranscript(prev => [...prev, { speaker: 'ai', text: response.text }]);
+
+            const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+            const groundingLinks = groundingChunks?.map(chunk => chunk.maps && ({ title: chunk.maps.title, uri: chunk.maps.uri })).filter(Boolean);
+
+            setTranscript(prev => [...prev, { speaker: 'ai', text: response.text, grounding: groundingLinks }]);
 
         } catch (error) {
             console.error("Error sending message:", error);
@@ -565,6 +680,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
         <div style={styles.conversationContainer}>
             <h3>How would you like to proceed?</h3>
             <p>Describe your symptoms by speaking to our AI assistant or by chatting via text and images.</p>
+             {locationError && <p style={{color: 'red', fontSize: '0.9em'}}>{locationError}</p>}
             <div style={styles.triageChoiceContainer}>
                 <button className="primary-button" style={{padding: '15px 30px', fontSize: '1.2em'}} onClick={() => setTriageMode('audio')}>Start Audio Triage</button>
                 <button className="secondary-button" style={{padding: '15px 30px', fontSize: '1.2em'}} onClick={() => setTriageMode('chat')}>Start Text/Image Triage</button>
@@ -577,6 +693,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
             <div style={styles.conversationContainer}>
                 <h3>Conversational Triage</h3>
                 <p>Describe your symptoms by speaking to our AI assistant.</p>
+                {locationError && <p style={{color: 'red', fontSize: '0.9em'}}>{locationError}</p>}
                 <button className="primary-button" style={{padding: '15px 30px', fontSize: '1.2em'}} onClick={handleStartAudioTriage}>Start Audio Triage</button>
                 <button style={{marginTop: '10px'}} onClick={() => setTriageMode('start')}>Back</button>
             </div>
@@ -590,6 +707,17 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                     ))}
                     <div ref={transcriptEndRef} />
                 </div>
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80px', margin: '10px 0'}}>
+                    <div style={{
+                        width: '50px',
+                        height: '50px',
+                        borderRadius: '50%',
+                        backgroundColor: 'var(--primary-color)',
+                        transition: 'transform 0.1s ease-out, opacity 0.1s',
+                        transform: `scale(${1 + micVolume * 1.2})`,
+                        opacity: Math.max(0.2, micVolume * 2),
+                    }}></div>
+                </div>
                 <div style={styles.statusIndicator}>
                     {statusText}
                 </div>
@@ -601,10 +729,25 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
     const renderChatTriage = () => (
          <>
             <div style={styles.transcriptContainer}>
+                {locationError && <p style={{textAlign: 'center', color: 'red', fontSize: '0.9em', paddingBottom: '10px'}}>{locationError}</p>}
                 {transcript.map((msg, index) => (
                     <div key={index} style={{...styles.transcriptMessage, ...(msg.speaker === 'user' ? styles.userMessage : styles.aiMessage)}}>
                         {msg.text}
                         {msg.image && <img src={msg.image} alt="User upload" style={styles.chatTranscriptImage} />}
+                        {msg.grounding && msg.grounding.length > 0 && (
+                            <div style={styles.groundingContainer}>
+                                <strong style={{marginBottom: '5px', display: 'block'}}>Relevant places:</strong>
+                                <ul style={styles.groundingList}>
+                                    {msg.grounding.map((link, i) => (
+                                        <li key={i} style={styles.groundingListItem}>
+                                            <a href={link.uri} target="_blank" rel="noopener noreferrer" style={styles.groundingLink}>
+                                                📍 {link.title}
+                                            </a>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
                     </div>
                 ))}
                 {isChatLoading && (
@@ -667,6 +810,7 @@ const DoctorView = ({ reports, onLogout }) => {
     const [selectedReportId, setSelectedReportId] = useState(null);
     const [analysis, setAnalysis] = useState({ id: null, content: '', isLoading: false });
     const [isSpeaking, setIsSpeaking] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
 
 
     useEffect(() => {
@@ -681,6 +825,11 @@ const DoctorView = ({ reports, onLogout }) => {
     }, [selectedReportId]);
 
     const selectedReport = reports.find(r => r.Triage_ID === selectedReportId);
+
+    const filteredReports = reports.filter(report => 
+        report.Triage_ID.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        report.Chief_Complaint_EN.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     const getPriorityStyle = (priority) => {
         switch (priority) {
@@ -763,15 +912,28 @@ const DoctorView = ({ reports, onLogout }) => {
             <main style={{...styles.main, ...styles.doctorDashboard}}>
                 <div style={styles.reportList}>
                     <h3 style={{marginTop: 0}}>Triage Queue</h3>
-                    {reports.length === 0 ? <p>No reports yet.</p> : reports.map(report => (
-                        <div 
-                            key={report.Triage_ID}
-                            style={{...styles.reportListItem, backgroundColor: selectedReportId === report.Triage_ID ? '#e9ecef' : 'transparent', borderColor: selectedReportId === report.Triage_ID ? '#007bff' : 'transparent'}}
-                            onClick={() => setSelectedReportId(report.Triage_ID)}
-                        >
-                            {report.Triage_ID}
-                        </div>
-                    ))}
+                    {reports.length === 0 ? (
+                        <p>No reports yet.</p> 
+                    ) : (
+                        <>
+                            <input
+                                type="text"
+                                placeholder="Search by ID or complaint..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                style={styles.searchInput}
+                            />
+                            {filteredReports.length === 0 ? <p>No matching reports.</p> : filteredReports.map(report => (
+                                <div 
+                                    key={report.Triage_ID}
+                                    style={{...styles.reportListItem, backgroundColor: selectedReportId === report.Triage_ID ? '#e9ecef' : 'transparent', borderColor: selectedReportId === report.Triage_ID ? '#007bff' : 'transparent'}}
+                                    onClick={() => setSelectedReportId(report.Triage_ID)}
+                                >
+                                    {report.Triage_ID}
+                                </div>
+                            ))}
+                        </>
+                    )}
                 </div>
                 <div style={styles.reportDetail}>
                     {selectedReport ? (
