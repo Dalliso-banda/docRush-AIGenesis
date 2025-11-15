@@ -1,0 +1,7 @@
+{
+  "description": "An AI agent that proactively interviews patients using a conversational, multilingual approach, and converts raw, messy input (text, image, audio) into a clean, structured, and actionable JSON report for the doctor.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "name": "Copy of "
+}
