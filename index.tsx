@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type, Modality, LiveServerMessage, Blob, FunctionDeclaration, Chat } from '@google/genai';
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 
 // --- Helper Functions ---
 function encode(bytes) {
@@ -81,9 +81,10 @@ const LoginScreen = ({ onLogin }) => (
         <main className="card-body d-flex flex-column justify-content-center align-items-center text-center">
             <h2 className="display-5">Welcome to Doc Rush</h2>
             <p className="lead">Your AI-powered medical triage assistant.</p>
-            <div className="mt-3">
-                <button className="btn btn-primary btn-lg mx-2 px-4 py-2" onClick={() => onLogin('patient')}>I'm a Patient</button>
-                <button className="btn btn-secondary btn-lg mx-2 px-4 py-2" onClick={() => onLogin('doctor')}>I'm a Doctor</button>
+            <div className="mt-3 d-flex flex-wrap justify-content-center gap-2">
+                <button className="btn btn-primary btn-lg px-4 py-2" onClick={() => onLogin('patient')}>I'm a Patient</button>
+                <button className="btn btn-secondary btn-lg px-4 py-2" onClick={() => onLogin('doctor')}>I'm a Doctor</button>
+                <button className="btn btn-info btn-lg px-4 py-2" onClick={() => onLogin('clinic')}>I'm Clinic Staff</button>
             </div>
         </main>
     </div>
@@ -612,6 +613,11 @@ const DoctorView = ({ reports, onLogout }) => {
     });
     const aiRef = useRef<GoogleGenAI | null>(null);
 
+    // This is a mock for which doctor is logged in.
+    const loggedInDoctor = "Dr. Smith";
+
+    const assignedReports = reports.filter(r => r.assignedDoctor === loggedInDoctor);
+
     // Lazy initialize AI to avoid creating it unnecessarily
     const getAi = () => {
         if (!aiRef.current) {
@@ -757,14 +763,14 @@ const DoctorView = ({ reports, onLogout }) => {
     return (
         <div className="card shadow-sm h-100">
             <div className="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-                <h1 className="h4 m-0">Doctor Dashboard</h1>
+                <h1 className="h4 m-0">Doctor Dashboard ({loggedInDoctor})</h1>
                 <button className="btn btn-sm btn-light" onClick={onLogout}>Logout</button>
             </div>
             <main className="card-body d-flex flex-grow-1 overflow-hidden p-0">
                 <div className="col-4 border-end overflow-auto">
                     <div className="list-group list-group-flush">
-                        {reports.length === 0 && <div className="p-3 text-muted">No patient reports submitted yet.</div>}
-                        {reports.map(report => (
+                        {assignedReports.length === 0 && <div className="p-3 text-muted">No patient reports assigned to you yet.</div>}
+                        {assignedReports.map(report => (
                             <button
                                 key={report.Triage_ID}
                                 onClick={() => handleSelectReport(report.Triage_ID)}
@@ -784,8 +790,8 @@ const DoctorView = ({ reports, onLogout }) => {
                 <div className="col-8 d-flex flex-column overflow-auto p-3">
                     {!selectedReport ? (
                         <div className="m-auto text-center text-muted">
-                            <h4>Welcome, Doctor.</h4>
-                            <p>Select a report from the list to view details and AI-powered analysis.</p>
+                            <h4>Welcome, {loggedInDoctor}.</h4>
+                            <p>Select a report from your queue to view details and AI-powered analysis.</p>
                         </div>
                     ) : (
                         <div>
@@ -854,23 +860,123 @@ const DoctorView = ({ reports, onLogout }) => {
     );
 };
 
+const ClinicView = ({ reports, updateReport, onLogout }) => {
+    const doctors = ["Dr. Smith", "Dr. Jones", "Dr. Chen"];
+    const statuses = ["Pending Review", "Assigned", "Reviewed", "Completed"];
+
+    const handleDoctorChange = (reportId, newDoctor) => {
+        const newStatus = newDoctor ? "Assigned" : "Pending Review";
+        updateReport(reportId, { assignedDoctor: newDoctor, status: newStatus });
+    };
+    
+    const handleStatusChange = (reportId, newStatus) => {
+        updateReport(reportId, { status: newStatus });
+    };
+
+    const getPriorityBadge = (priority) => {
+        switch(priority) {
+            case 'HIGH': return 'bg-danger';
+            case 'MEDIUM': return 'bg-warning text-dark';
+            case 'LOW': return 'bg-success';
+            default: return 'bg-secondary';
+        }
+    };
+
+    return (
+        <div className="card shadow-sm h-100">
+            <div className="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                <h1 className="h4 m-0">Clinic Dashboard</h1>
+                <button className="btn btn-sm btn-light" onClick={onLogout}>Logout</button>
+            </div>
+            <main className="card-body d-flex flex-column flex-grow-1 overflow-auto p-3">
+                {reports.length === 0 ? (
+                    <div className="m-auto text-center text-muted">
+                        <h4>No patient reports submitted yet.</h4>
+                        <p>Incoming reports will appear here for assignment.</p>
+                    </div>
+                ) : (
+                    <div className="table-responsive">
+                        <table className="table table-striped table-hover align-middle">
+                            <thead className="table-light">
+                                <tr>
+                                    <th scope="col">Triage ID</th>
+                                    <th scope="col">Chief Complaint</th>
+                                    <th scope="col">Priority</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Assigned Doctor</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {reports.map(report => (
+                                    <tr key={report.Triage_ID}>
+                                        <td>{report.Triage_ID}</td>
+                                        <td>{report.Chief_Complaint_EN}</td>
+                                        <td>
+                                            <span className={`badge ${getPriorityBadge(report.Triage_Priority_Score)}`}>
+                                                {report.Triage_Priority_Score}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <select 
+                                                className="form-select form-select-sm"
+                                                value={report.status}
+                                                onChange={(e) => handleStatusChange(report.Triage_ID, e.target.value)}
+                                                aria-label={`Status for report ${report.Triage_ID}`}
+                                            >
+                                                {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <select 
+                                                className="form-select form-select-sm"
+                                                value={report.assignedDoctor || ''}
+                                                onChange={(e) => handleDoctorChange(report.Triage_ID, e.target.value)}
+                                                 aria-label={`Assign doctor for report ${report.Triage_ID}`}
+                                            >
+                                                <option value="">Unassigned</option>
+                                                {doctors.map(d => <option key={d} value={d}>{d}</option>)}
+                                            </select>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </main>
+        </div>
+    );
+};
+
 
 // --- Main App Component ---
 const App = () => {
-    const [userType, setUserType] = useState(null); // 'patient', 'doctor', or null for login
+    const [userType, setUserType] = useState(null); // 'patient', 'doctor', 'clinic' or null
     const [triageReports, setTriageReports] = useState([]);
 
     const handleLogin = (type) => setUserType(type);
     const handleLogout = () => setUserType(null);
 
     const handleTriageComplete = (report) => {
-        setTriageReports(prevReports => [...prevReports, report]);
-        // For a real app, this would be saved to a backend.
-        // After completion, we can log the "patient" out to return to the main screen.
+        const newReport = {
+            ...report,
+            status: 'Pending Review',
+            assignedDoctor: null,
+            date: new Date().toISOString(),
+        };
+        setTriageReports(prevReports => [...prevReports, newReport]);
         setUserType(null);
         alert(`Triage report ${report.Triage_ID} submitted successfully! A doctor will review it shortly.`);
     };
     
+    const handleUpdateReport = (reportId, updates) => {
+        setTriageReports(prevReports => 
+            prevReports.map(report =>
+                report.Triage_ID === reportId ? { ...report, ...updates } : report
+            )
+        );
+    };
+
     // Add some mock data for demonstration purposes
     useEffect(() => {
         setTriageReports([
@@ -880,7 +986,10 @@ const App = () => {
                 "Chief_Complaint_EN": "Severe headache and dizziness",
                 "Triage_Priority_Score": "HIGH",
                 "Structured_Symptom_List": ["Sudden onset of severe headache", "Dizziness and lightheadedness", "Nausea", "Sensitivity to light"],
-                "AI_Rationale": "The combination of a sudden, severe headache with neurological symptoms like dizziness suggests a potentially serious condition that requires immediate medical attention."
+                "AI_Rationale": "The combination of a sudden, severe headache with neurological symptoms like dizziness suggests a potentially serious condition that requires immediate medical attention.",
+                "status": "Assigned",
+                "assignedDoctor": "Dr. Smith",
+                "date": new Date().toISOString()
             },
             {
                 "Triage_ID": "TR-DEMO-002",
@@ -888,7 +997,21 @@ const App = () => {
                 "Chief_Complaint_EN": "Sore throat and cough",
                 "Triage_Priority_Score": "LOW",
                 "Structured_Symptom_List": ["Scratchy throat for 2 days", "Dry cough, especially at night", "No fever", "General fatigue"],
-                "AI_Rationale": "Symptoms are consistent with a common upper respiratory viral infection. The absence of fever and severe symptoms lowers the priority. Self-care and monitoring are appropriate."
+                "AI_Rationale": "Symptoms are consistent with a common upper respiratory viral infection. The absence of fever and severe symptoms lowers the priority. Self-care and monitoring are appropriate.",
+                "status": "Pending Review",
+                "assignedDoctor": null,
+                "date": new Date().toISOString()
+            },
+            {
+                "Triage_ID": "TR-DEMO-003",
+                "Patient_Language_Used": "English",
+                "Chief_Complaint_EN": "Twisted ankle, swelling",
+                "Triage_Priority_Score": "MEDIUM",
+                "Structured_Symptom_List": ["Fell while running", "Immediate pain in right ankle", "Swelling and bruising", "Difficulty bearing weight"],
+                "AI_Rationale": "Symptoms indicate a likely musculoskeletal injury such as a sprain or fracture. While not life-threatening, it requires timely medical evaluation to prevent complications.",
+                 "status": "Assigned",
+                "assignedDoctor": "Dr. Jones",
+                "date": new Date().toISOString()
             }
         ]);
     }, []);
@@ -899,6 +1022,8 @@ const App = () => {
                 return <PatientView onTriageComplete={handleTriageComplete} onLogout={handleLogout} />;
             case 'doctor':
                 return <DoctorView reports={triageReports} onLogout={handleLogout} />;
+            case 'clinic':
+                return <ClinicView reports={triageReports} updateReport={handleUpdateReport} onLogout={handleLogout} />;
             default:
                 return <LoginScreen onLogin={handleLogin} />;
         }
