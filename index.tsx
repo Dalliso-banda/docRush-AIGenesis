@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type, Modality, LiveServerMessage, Blob, FunctionDeclaration, Chat } from '@google/genai';
+import jsPDF from 'jspdf';
 
 // --- Helper Functions ---
 function encode(bytes) {
@@ -70,222 +71,19 @@ const fileToDataUrl = (file: File): Promise<string> => new Promise((resolve, rej
 const dataUrlToBase64 = (dataUrl: string) => dataUrl.split(',')[1];
 
 
-// --- Styles ---
-// FIX: Explicitly type the styles object to conform to React.CSSProperties, resolving multiple type errors.
-const styles: { [key: string]: React.CSSProperties } = {
-    container: {
-        width: '100%',
-        maxWidth: '800px',
-        margin: '0 auto',
-        height: 'calc(100vh - 40px)',
-        backgroundColor: 'var(--white)',
-        borderRadius: 'var(--border-radius)',
-        boxShadow: 'var(--box-shadow)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        marginBlock: '20px',
-    },
-    header: {
-        backgroundColor: 'var(--primary-color)',
-        color: 'var(--white)',
-        padding: '15px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    headerTitle: { margin: 0, fontSize: '1.5em' },
-    main: { flex: 1, padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column' },
-    loginContainer: {
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100%',
-        textAlign: 'center',
-    },
-    loginButton: { margin: '10px', padding: '15px 30px', fontSize: '1.2em' },
-    doctorDashboard: { display: 'flex', height: '100%', gap: '20px' },
-    reportList: {
-        width: '200px',
-        borderRight: '1px solid #eee',
-        paddingRight: '20px',
-        overflowY: 'auto'
-    },
-    searchInput: {
-        width: '100%',
-        padding: '8px',
-        marginBottom: '10px',
-        borderRadius: 'var(--border-radius)',
-        border: '1px solid #ccc',
-        boxSizing: 'border-box',
-    },
-    reportListItem: {
-        padding: '10px',
-        cursor: 'pointer',
-        borderRadius: 'var(--border-radius)',
-        marginBottom: '5px',
-        border: '1px solid transparent'
-    },
-    reportDetail: { flex: 1, overflowY: 'auto' },
-    pre: {
-        backgroundColor: '#f8f9fa',
-        padding: '15px',
-        borderRadius: 'var(--border-radius)',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        fontFamily: 'monospace'
-    },
-    loader: { textAlign: 'center', padding: '20px', fontSize: '1.2em', margin: 'auto' },
-    // Patient view styles
-    conversationContainer: {
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100%',
-        textAlign: 'center'
-    },
-    transcriptContainer: {
-        flex: 1,
-        width: '100%',
-        overflowY: 'auto',
-        padding: '15px 15px 0 15px',
-        marginBottom: '15px',
-    },
-    transcriptMessage: {
-        marginBottom: '12px',
-        padding: '8px 14px',
-        borderRadius: '18px',
-        maxWidth: '85%',
-        display: 'inline-block',
-        textAlign: 'left',
-        wordBreak: 'break-word',
-    },
-    userMessage: {
-        backgroundColor: 'var(--primary-color)',
-        color: 'var(--white)',
-        alignSelf: 'flex-end',
-        borderBottomRightRadius: '4px',
-        float: 'right',
-        clear: 'both',
-    },
-    aiMessage: {
-        backgroundColor: '#e9ecef',
-        alignSelf: 'flex-start',
-        borderBottomLeftRadius: '4px',
-        float: 'left',
-        clear: 'both',
-    },
-    statusIndicator: {
-        padding: '10px',
-        textAlign: 'center',
-        color: '#666',
-        fontStyle: 'italic',
-        minHeight: '40px',
-    },
-    doctorActions: {
-        display: 'flex',
-        gap: '10px',
-        marginTop: '20px',
-        borderTop: '1px solid #eee',
-        paddingTop: '20px',
-    },
-    actionButton: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-    },
-    chatInputForm: {
-        display: 'flex',
-        padding: '10px 0',
-        borderTop: '1px solid #eee',
-        gap: '10px',
-        alignItems: 'flex-end',
-    },
-    chatTextarea: {
-        flex: 1,
-        resize: 'none',
-        padding: '10px',
-        borderRadius: 'var(--border-radius)',
-        border: '1px solid #ccc',
-        fontFamily: 'inherit',
-        fontSize: '1em',
-        minHeight: '24px',
-        maxHeight: '150px',
-    },
-    chatImagePreview: {
-        position: 'relative',
-        marginBottom: '10px',
-        alignSelf: 'flex-start'
-    },
-    chatImage: {
-        maxWidth: '100px',
-        maxHeight: '100px',
-        borderRadius: 'var(--border-radius)',
-        border: '1px solid #eee',
-    },
-    removeImageButton: {
-        position: 'absolute',
-        top: '-10px',
-        right: '-10px',
-        background: 'rgba(0,0,0,0.6)',
-        color: 'white',
-        border: 'none',
-        borderRadius: '50%',
-        width: '24px',
-        height: '24px',
-        cursor: 'pointer',
-        lineHeight: '24px',
-        textAlign: 'center',
-        padding: 0,
-        fontSize: '14px',
-    },
-    chatTranscriptImage: {
-        maxWidth: '200px',
-        borderRadius: 'var(--border-radius)',
-        marginTop: '5px',
-        display: 'block'
-    },
-    triageChoiceContainer: {
-        display: 'flex',
-        gap: '20px',
-    },
-    groundingContainer: {
-        marginTop: '10px',
-        padding: '10px',
-        backgroundColor: '#f8f9fa',
-        borderRadius: 'var(--border-radius)',
-        border: '1px solid #dee2e6',
-    },
-    groundingList: {
-        listStyle: 'none',
-        padding: 0,
-        margin: 0,
-    },
-    groundingListItem: {
-        marginBottom: '5px',
-    },
-    groundingLink: {
-        textDecoration: 'none',
-        color: 'var(--primary-color)',
-        fontWeight: '500',
-    },
-};
-
 // --- Components ---
 
 const LoginScreen = ({ onLogin }) => (
-    <div style={styles.container}>
-        <div style={styles.header}>
-            <h1 style={styles.headerTitle}>Doc Rush</h1>
+    <div className="card shadow-sm h-100">
+        <div className="card-header bg-primary text-white">
+            <h1 className="h4 m-0">Doc Rush</h1>
         </div>
-        <main style={{...styles.main, ...styles.loginContainer}}>
-            <h2>Welcome to Doc Rush</h2>
-            <p>Your AI-powered medical triage assistant.</p>
-            <div>
-                <button style={styles.loginButton} className="primary-button" onClick={() => onLogin('patient')}>I'm a Patient</button>
-                <button style={styles.loginButton} className="secondary-button" onClick={() => onLogin('doctor')}>I'm a Doctor</button>
+        <main className="card-body d-flex flex-column justify-content-center align-items-center text-center">
+            <h2 className="display-5">Welcome to Doc Rush</h2>
+            <p className="lead">Your AI-powered medical triage assistant.</p>
+            <div className="mt-3">
+                <button className="btn btn-primary btn-lg mx-2 px-4 py-2" onClick={() => onLogin('patient')}>I'm a Patient</button>
+                <button className="btn btn-secondary btn-lg mx-2 px-4 py-2" onClick={() => onLogin('doctor')}>I'm a Doctor</button>
             </div>
         </main>
     </div>
@@ -637,7 +435,6 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
 
             setTranscript(prev => [...prev, userMessage]);
 
-            // FIX: The `message` property for `sendMessage` should be an array of parts, not an object containing a `parts` property.
             const response = await chatSessionRef.current!.sendMessage({ message: parts });
             
             if (response.functionCalls) {
@@ -670,77 +467,77 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
     
     // --- Render Logic ---
     if (isLoading) {
-        return <div style={{...styles.container, ...styles.loginContainer, ...styles.loader}}>
+        return <div className="d-flex flex-column justify-content-center align-items-center h-100 text-center">
             <h3>Generating your secure report...</h3>
             <p>This may take a moment.</p>
         </div>;
     }
 
     const renderTriageChoice = () => (
-        <div style={styles.conversationContainer}>
+        <div className="d-flex flex-column justify-content-center align-items-center h-100 text-center p-3">
             <h3>How would you like to proceed?</h3>
-            <p>Describe your symptoms by speaking to our AI assistant or by chatting via text and images.</p>
-             {locationError && <p style={{color: 'red', fontSize: '0.9em'}}>{locationError}</p>}
-            <div style={styles.triageChoiceContainer}>
-                <button className="primary-button" style={{padding: '15px 30px', fontSize: '1.2em'}} onClick={() => setTriageMode('audio')}>Start Audio Triage</button>
-                <button className="secondary-button" style={{padding: '15px 30px', fontSize: '1.2em'}} onClick={() => setTriageMode('chat')}>Start Text/Image Triage</button>
+            <p className="lead">Describe your symptoms by speaking to our AI assistant or by chatting via text and images.</p>
+             {locationError && <p className="text-danger small">{locationError}</p>}
+            <div className="d-flex gap-3 mt-3">
+                <button className="btn btn-primary btn-lg" onClick={() => setTriageMode('audio')}>Start Audio Triage</button>
+                <button className="btn btn-secondary btn-lg" onClick={() => setTriageMode('chat')}>Start Text/Image Triage</button>
             </div>
         </div>
     );
 
     const renderAudioTriage = () => (
         !isSessionActive ? (
-            <div style={styles.conversationContainer}>
+            <div className="d-flex flex-column justify-content-center align-items-center h-100 text-center p-3">
                 <h3>Conversational Triage</h3>
                 <p>Describe your symptoms by speaking to our AI assistant.</p>
-                {locationError && <p style={{color: 'red', fontSize: '0.9em'}}>{locationError}</p>}
-                <button className="primary-button" style={{padding: '15px 30px', fontSize: '1.2em'}} onClick={handleStartAudioTriage}>Start Audio Triage</button>
-                <button style={{marginTop: '10px'}} onClick={() => setTriageMode('start')}>Back</button>
+                {locationError && <p className="text-danger small">{locationError}</p>}
+                <button className="btn btn-primary btn-lg" onClick={handleStartAudioTriage}>Start Audio Triage</button>
+                <button className="btn btn-link mt-2" onClick={() => setTriageMode('start')}>Back</button>
             </div>
         ) : (
-            <>
-                <div style={styles.transcriptContainer}>
+             <div className="d-flex flex-column h-100 p-3">
+                <div className="flex-grow-1 w-100 overflow-auto mb-3 d-flex flex-column gap-2">
                      {transcript.map((msg, index) => (
-                        <div key={index} style={{...styles.transcriptMessage, ...(msg.speaker === 'user' ? styles.userMessage : styles.aiMessage)}}>
+                        <div key={index} className={`w-auto mw-75 p-2 px-3 rounded-3 text-start ${msg.speaker === 'user' ? 'bg-primary text-white align-self-end' : 'bg-light align-self-start'}`}>
                             {msg.text}
                         </div>
                     ))}
                     <div ref={transcriptEndRef} />
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80px', margin: '10px 0'}}>
+                <div className="d-flex justify-content-center align-items-center" style={{ minHeight: '80px', margin: '10px 0'}}>
                     <div style={{
                         width: '50px',
                         height: '50px',
                         borderRadius: '50%',
-                        backgroundColor: 'var(--primary-color)',
+                        backgroundColor: 'var(--bs-primary)',
                         transition: 'transform 0.1s ease-out, opacity 0.1s',
-                        transform: `scale(${1 + micVolume * 1.2})`,
+                        transform: `scale(${1 + micVolume * 1.5})`,
                         opacity: Math.max(0.2, micVolume * 2),
                     }}></div>
                 </div>
-                <div style={styles.statusIndicator}>
+                <div className="p-2 text-center text-muted fst-italic" style={{minHeight: '40px'}}>
                     {statusText}
                 </div>
-                <button className="secondary-button" onClick={audioCleanup}>End Conversation</button>
-            </>
+                <button className="btn btn-danger" onClick={audioCleanup}>End Conversation</button>
+            </div>
         )
     );
 
     const renderChatTriage = () => (
-         <>
-            <div style={styles.transcriptContainer}>
-                {locationError && <p style={{textAlign: 'center', color: 'red', fontSize: '0.9em', paddingBottom: '10px'}}>{locationError}</p>}
+         <div className="d-flex flex-column h-100">
+            <div className="flex-grow-1 w-100 overflow-auto p-3 d-flex flex-column gap-2">
+                {locationError && <p className="text-center text-danger small pb-2">{locationError}</p>}
                 {transcript.map((msg, index) => (
-                    <div key={index} style={{...styles.transcriptMessage, ...(msg.speaker === 'user' ? styles.userMessage : styles.aiMessage)}}>
+                    <div key={index} className={`w-auto mw-75 p-2 px-3 rounded-3 text-start ${msg.speaker === 'user' ? 'bg-primary text-white align-self-end' : 'bg-light align-self-start'}`}>
                         {msg.text}
-                        {msg.image && <img src={msg.image} alt="User upload" style={styles.chatTranscriptImage} />}
+                        {msg.image && <img src={msg.image} alt="User upload" className="img-fluid rounded mt-1 d-block" style={{maxWidth: '200px'}} />}
                         {msg.grounding && msg.grounding.length > 0 && (
-                            <div style={styles.groundingContainer}>
-                                <strong style={{marginBottom: '5px', display: 'block'}}>Relevant places:</strong>
-                                <ul style={styles.groundingList}>
+                            <div className="mt-2 p-2 bg-body-tertiary rounded border">
+                                <strong className="mb-1 d-block">Relevant places:</strong>
+                                <ul className="list-unstyled p-0 m-0">
                                     {msg.grounding.map((link, i) => (
-                                        <li key={i} style={styles.groundingListItem}>
-                                            <a href={link.uri} target="_blank" rel="noopener noreferrer" style={styles.groundingLink}>
+                                        <li key={i} className="mb-1">
+                                            <a href={link.uri} target="_blank" rel="noopener noreferrer" className="text-decoration-none fw-medium">
                                                 📍 {link.title}
                                             </a>
                                         </li>
@@ -751,23 +548,23 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                     </div>
                 ))}
                 {isChatLoading && (
-                    <div style={{...styles.transcriptMessage, ...styles.aiMessage}}>
+                    <div className="w-auto mw-75 p-2 px-3 rounded-3 text-start bg-light align-self-start">
                         Typing...
                     </div>
                 )}
                  <div ref={transcriptEndRef} />
             </div>
             
-             <div style={{padding: '0 15px'}}>
+             <div className="p-3 border-top bg-white">
                 {chatInputImage && (
-                    <div style={styles.chatImagePreview}>
-                        <img src={URL.createObjectURL(chatInputImage)} alt="Preview" style={styles.chatImage} />
-                        <button style={styles.removeImageButton} onClick={() => setChatInputImage(null)}>✕</button>
+                    <div className="position-relative mb-2 align-self-start w-auto">
+                        <img src={URL.createObjectURL(chatInputImage)} alt="Preview" className="img-thumbnail" style={{maxWidth: '100px', maxHeight: '100px'}}/>
+                        <button className="btn btn-sm btn-dark rounded-circle position-absolute top-0 start-100 translate-middle" onClick={() => setChatInputImage(null)} style={{width: '24px', height: '24px', lineHeight: '1', padding: '0'}}>✕</button>
                     </div>
                  )}
-                 <div style={styles.chatInputForm}>
+                 <div className="d-flex gap-2 align-items-end">
                      <textarea
-                         style={styles.chatTextarea}
+                         className="form-control"
                          value={chatInputText}
                          onChange={(e) => setChatInputText(e.target.value)}
                          placeholder="Type your message..."
@@ -779,24 +576,24 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                              }
                          }}
                      />
-                      <label htmlFor="file-upload" className="primary-button" style={{padding: '10px', cursor: 'pointer', fontSize: '1.5em'}} aria-label="Upload image">
+                      <label htmlFor="file-upload" className="btn btn-primary flex-shrink-0" style={{fontSize: '1.2em'}} aria-label="Upload image">
                          📎
                      </label>
-                     <input id="file-upload" type="file" accept="image/*" style={{display: 'none'}} onChange={handleImageSelect} />
-                     <button className="secondary-button" onClick={handleSendMessage} disabled={isChatLoading}>Send</button>
+                     <input id="file-upload" type="file" accept="image/*" className="d-none" onChange={handleImageSelect} />
+                     <button className="btn btn-secondary flex-shrink-0" onClick={handleSendMessage} disabled={isChatLoading}>Send</button>
                  </div>
-                 <button style={{marginTop: '10px', width: '100%'}} onClick={() => setTriageMode('start')}>Back to Triage Choice</button>
+                 <button className="btn btn-link mt-2 w-100" onClick={() => setTriageMode('start')}>Back to Triage Choice</button>
             </div>
-         </>
+         </div>
     );
 
     return (
-        <div style={styles.container}>
-            <div style={styles.header}>
-                <h1 style={styles.headerTitle}>Patient Intake</h1>
-                <button onClick={onLogout}>Logout</button>
+        <div className="card shadow-sm h-100">
+            <div className="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h1 className="h4 m-0">Patient Intake</h1>
+                <button className="btn btn-sm btn-light" onClick={onLogout}>Logout</button>
             </div>
-            <main style={styles.main}>
+            <main className="card-body d-flex flex-column flex-grow-1 overflow-hidden p-0">
                 {triageMode === 'start' && renderTriageChoice()}
                 {triageMode === 'audio' && renderAudioTriage()}
                 {triageMode === 'chat' && renderChatTriage()}
@@ -808,210 +605,312 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
 
 const DoctorView = ({ reports, onLogout }) => {
     const [selectedReportId, setSelectedReportId] = useState(null);
-    const [analysis, setAnalysis] = useState({ id: null, content: '', isLoading: false });
-    const [isSpeaking, setIsSpeaking] = useState(false);
-    const [searchQuery, setSearchQuery] = useState('');
+    const [analysis, setAnalysis] = useState({
+        isLoading: false,
+        data: null,
+        error: null,
+    });
+    const aiRef = useRef<GoogleGenAI | null>(null);
 
-
-    useEffect(() => {
-        if (reports.length > 0 && !selectedReportId) {
-            setSelectedReportId(reports[0].Triage_ID);
+    // Lazy initialize AI to avoid creating it unnecessarily
+    const getAi = () => {
+        if (!aiRef.current) {
+            aiRef.current = new GoogleGenAI({ apiKey: process.env.API_KEY });
         }
-    }, [reports, selectedReportId]);
-    
-    useEffect(() => {
-        // Reset analysis when selected report changes
-        setAnalysis({ id: null, content: '', isLoading: false });
-    }, [selectedReportId]);
+        return aiRef.current;
+    };
 
-    const selectedReport = reports.find(r => r.Triage_ID === selectedReportId);
-
-    const filteredReports = reports.filter(report => 
-        report.Triage_ID.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        report.Chief_Complaint_EN.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    const getPriorityStyle = (priority) => {
-        switch (priority) {
-            case 'HIGH': return { color: '#dc3545', fontWeight: 'bold' };
-            case 'MEDIUM': return { color: '#ffc107', fontWeight: 'bold' };
-            case 'LOW': return { color: '#28a745', fontWeight: 'bold' };
-            default: return {};
+    const handleSelectReport = (reportId: string) => {
+        if (selectedReportId === reportId) {
+            setSelectedReportId(null); // Deselect if clicking the same report
+            setAnalysis({ isLoading: false, data: null, error: null });
+        } else {
+            setSelectedReportId(reportId);
+            setAnalysis({ isLoading: true, data: null, error: null }); // Reset analysis on new selection
+            generateAnalysis(reportId);
         }
     };
 
-    const handleDeepAnalysis = async (report) => {
-        setAnalysis({ id: report.Triage_ID, content: '', isLoading: true });
+    const generateAnalysis = async (reportId: string) => {
+        const report = reports.find(r => r.Triage_ID === reportId);
+        if (!report) {
+            setAnalysis({ isLoading: false, data: null, error: 'Report not found.' });
+            return;
+        }
+
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const prompt = `Based on the following triage report, provide a deeper analysis for a medical professional. Include potential differential diagnoses, suggest immediate next steps or tests, and briefly mention any relevant research or similar case studies. Keep the language clinical and concise.
+            const ai = getAi();
+            const prompt = `Analyze the following triage report and provide a concise differential diagnosis and recommended next steps for a medical professional. Format the output as JSON.
             
             Triage Report:
-            ${JSON.stringify(report, null, 2)}`;
+            ${JSON.stringify(report, null, 2)}
+            `;
+
+            const responseSchema = {
+                type: Type.OBJECT,
+                properties: {
+                    differential_diagnosis: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                condition: { type: Type.STRING },
+                                probability: { type: Type.STRING, enum: ['High', 'Medium', 'Low'] },
+                                rationale: { type: Type.STRING }
+                            },
+                            required: ['condition', 'probability', 'rationale']
+                        }
+                    },
+                    recommended_next_steps: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING }
+                    },
+                    urgency_assessment: { type: Type.STRING }
+                },
+                required: ['differential_diagnosis', 'recommended_next_steps', 'urgency_assessment']
+            };
 
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-pro',
                 contents: prompt,
                 config: {
-                    thinkingConfig: { thinkingBudget: 32768 }
-                }
-            });
-
-            setAnalysis({ id: report.Triage_ID, content: response.text, isLoading: false });
-
-        } catch (error) {
-            console.error("Error getting deep analysis:", error);
-            setAnalysis({ id: report.Triage_ID, content: 'Error generating analysis.', isLoading: false });
-        }
-    };
-    
-    const handleReadReport = async (report) => {
-        if (isSpeaking) return;
-        setIsSpeaking(true);
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const textToRead = `Triage Report Summary for patient ${report.Triage_ID}. Priority is ${report.Triage_Priority_Score}. Chief Complaint: ${report.Chief_Complaint_EN}.`;
-            const response = await ai.models.generateContent({
-                model: "gemini-2.5-flash-preview-tts",
-                contents: [{ parts: [{ text: textToRead }] }],
-                config: {
-                    responseModalities: [Modality.AUDIO],
-                    speechConfig: {
-                        voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-                    },
+                    responseMimeType: 'application/json',
+                    responseSchema: responseSchema,
                 },
             });
-            const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-            if (base64Audio) {
-                 // FIX: Cast window to `any` to access the vendor-prefixed `webkitAudioContext`.
-                 const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-                 const audioBuffer = await decodeAudioData(decode(base64Audio), outputAudioContext, 24000, 1);
-                 const source = outputAudioContext.createBufferSource();
-                 source.buffer = audioBuffer;
-                 source.connect(outputAudioContext.destination);
-                 source.start();
-                 source.onended = () => {
-                     outputAudioContext.close();
-                     setIsSpeaking(false);
-                 };
-            } else {
-                setIsSpeaking(false);
-            }
+
+            const analysisData = JSON.parse(response.text);
+            setAnalysis({ isLoading: false, data: analysisData, error: null });
         } catch (error) {
-            console.error("Error generating speech:", error);
-            setIsSpeaking(false);
+            console.error("Error generating analysis:", error);
+            setAnalysis({ isLoading: false, data: null, error: 'Failed to generate analysis. Please try again.' });
         }
     };
-    
+
+    const downloadPdf = (report, analysisData) => {
+        const doc = new jsPDF();
+
+        doc.setFontSize(18);
+        doc.text("Triage Report", 14, 22);
+
+        doc.setFontSize(12);
+        doc.text(`Triage ID: ${report.Triage_ID}`, 14, 32);
+        doc.text(`Date: ${new Date().toLocaleString()}`, 14, 38);
+
+        let y = 50;
+
+        const addSection = (title, content) => {
+            if (y > 260) { doc.addPage(); y = 20; }
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text(title, 14, y);
+            y += 7;
+            doc.setFontSize(11);
+            doc.setFont(undefined, 'normal');
+
+            const splitContent = doc.splitTextToSize(String(content), 180);
+            doc.text(splitContent, 14, y);
+            y += (splitContent.length * 5) + 5;
+        };
+
+        addSection("Chief Complaint", report.Chief_Complaint_EN);
+        addSection("Triage Priority", report.Triage_Priority_Score);
+        addSection("Symptoms", report.Structured_Symptom_List.join('\n'));
+        addSection("AI Rationale for Priority", report.AI_Rationale);
+
+        if (analysisData) {
+            doc.addPage();
+            y = 20;
+            doc.setFontSize(18);
+            doc.text("AI-Powered Analysis", 14, y);
+            y += 12;
+
+            addSection("Urgency Assessment", analysisData.urgency_assessment);
+
+            if (y > 260) { doc.addPage(); y = 20; }
+            doc.setFontSize(14);
+            doc.setFont(undefined, 'bold');
+            doc.text("Differential Diagnosis", 14, y);
+            y += 7;
+            doc.setFontSize(11);
+            doc.setFont(undefined, 'normal');
+            analysisData.differential_diagnosis.forEach(d => {
+                const diagText = `${d.condition} (Probability: ${d.probability}): ${d.rationale}`;
+                const splitText = doc.splitTextToSize(diagText, 180);
+                if (y + (splitText.length * 5) > 280) {
+                    doc.addPage();
+                    y = 20;
+                }
+                doc.text(splitText, 16, y);
+                y += (splitText.length * 5) + 2;
+            });
+            y += 5;
+
+            addSection("Recommended Next Steps", analysisData.recommended_next_steps.join('\n'));
+        }
+
+        doc.save(`Triage_Report_${report.Triage_ID}.pdf`);
+    };
+
+    const selectedReport = reports.find(r => r.Triage_ID === selectedReportId);
+
     return (
-        <div style={styles.container}>
-            <div style={styles.header}>
-                <h1 style={styles.headerTitle}>Doctor Dashboard</h1>
-                <button onClick={onLogout}>Logout</button>
+        <div className="card shadow-sm h-100">
+            <div className="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                <h1 className="h4 m-0">Doctor Dashboard</h1>
+                <button className="btn btn-sm btn-light" onClick={onLogout}>Logout</button>
             </div>
-            <main style={{...styles.main, ...styles.doctorDashboard}}>
-                <div style={styles.reportList}>
-                    <h3 style={{marginTop: 0}}>Triage Queue</h3>
-                    {reports.length === 0 ? (
-                        <p>No reports yet.</p> 
-                    ) : (
-                        <>
-                            <input
-                                type="text"
-                                placeholder="Search by ID or complaint..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                style={styles.searchInput}
-                            />
-                            {filteredReports.length === 0 ? <p>No matching reports.</p> : filteredReports.map(report => (
-                                <div 
-                                    key={report.Triage_ID}
-                                    style={{...styles.reportListItem, backgroundColor: selectedReportId === report.Triage_ID ? '#e9ecef' : 'transparent', borderColor: selectedReportId === report.Triage_ID ? '#007bff' : 'transparent'}}
-                                    onClick={() => setSelectedReportId(report.Triage_ID)}
-                                >
-                                    {report.Triage_ID}
+            <main className="card-body d-flex flex-grow-1 overflow-hidden p-0">
+                <div className="col-4 border-end overflow-auto">
+                    <div className="list-group list-group-flush">
+                        {reports.length === 0 && <div className="p-3 text-muted">No patient reports submitted yet.</div>}
+                        {reports.map(report => (
+                            <button
+                                key={report.Triage_ID}
+                                onClick={() => handleSelectReport(report.Triage_ID)}
+                                className={`list-group-item list-group-item-action ${selectedReportId === report.Triage_ID ? 'active' : ''}`}
+                                aria-current={selectedReportId === report.Triage_ID}
+                            >
+                                <div className="d-flex w-100 justify-content-between">
+                                    <h5 className="mb-1">Report: {report.Triage_ID}</h5>
+                                    <small>{new Date().toLocaleDateString()}</small>
                                 </div>
-                            ))}
-                        </>
-                    )}
+                                <p className="mb-1 text-truncate">{report.Chief_Complaint_EN}</p>
+                                <small>Priority: <span className={`fw-bold ${report.Triage_Priority_Score === 'HIGH' ? 'text-danger' : report.Triage_Priority_Score === 'MEDIUM' ? 'text-warning' : 'text-success'}`}>{report.Triage_Priority_Score}</span></small>
+                            </button>
+                        ))}
+                    </div>
                 </div>
-                <div style={styles.reportDetail}>
-                    {selectedReport ? (
-                        <>
-                             <h2 style={{marginTop: 0}}>Report: {selectedReport.Triage_ID}</h2>
-                             <p><strong>Priority:</strong> <span style={getPriorityStyle(selectedReport.Triage_Priority_Score)}>{selectedReport.Triage_Priority_Score}</span></p>
-                             <p><strong>Patient Language:</strong> {selectedReport.Patient_Language_Used}</p>
-                             <p><strong>Chief Complaint:</strong> {selectedReport.Chief_Complaint_EN}</p>
-                             <div>
-                                <strong>Symptoms:</strong>
-                                <ul>
-                                    {selectedReport.Structured_Symptom_List.map((symptom, i) => <li key={i}>{symptom}</li>)}
-                                </ul>
-                             </div>
-                             <p><strong>AI Rationale:</strong> {selectedReport.AI_Rationale}</p>
-
-                             <div style={styles.doctorActions}>
-                                <button className="secondary-button" style={styles.actionButton} onClick={() => handleDeepAnalysis(selectedReport)} disabled={analysis.isLoading}>
-                                    {analysis.isLoading && analysis.id === selectedReportId ? 'Analyzing...' : '🧠 Deeper Analysis'}
+                <div className="col-8 d-flex flex-column overflow-auto p-3">
+                    {!selectedReport ? (
+                        <div className="m-auto text-center text-muted">
+                            <h4>Welcome, Doctor.</h4>
+                            <p>Select a report from the list to view details and AI-powered analysis.</p>
+                        </div>
+                    ) : (
+                        <div>
+                            <div className="d-flex justify-content-between align-items-center mb-3">
+                                <h3>Report: {selectedReport.Triage_ID}</h3>
+                                <button
+                                    className="btn btn-primary"
+                                    onClick={() => downloadPdf(selectedReport, analysis.data)}
+                                    disabled={!selectedReport}
+                                >
+                                    Download PDF
                                 </button>
-                                 <button className="primary-button" style={styles.actionButton} onClick={() => handleReadReport(selectedReport)} disabled={isSpeaking}>
-                                    {isSpeaking ? 'Speaking...' : '🔊 Read Aloud'}
-                                </button>
-                             </div>
+                            </div>
 
-                             {analysis.id === selectedReportId && (
-                                <div style={{marginTop: '20px'}}>
-                                    {analysis.isLoading ? (
-                                        <div style={styles.loader}>Getting deeper insights...</div>
-                                    ) : (
-                                        analysis.content && (
-                                            <div>
-                                                <h3>Deep Analysis</h3>
-                                                <pre style={styles.pre}>{analysis.content}</pre>
-                                            </div>
-                                        )
+                            <div className="card mb-3">
+                                <div className="card-body">
+                                    <h5 className="card-title">Triage Summary</h5>
+                                    <p><strong>Chief Complaint:</strong> {selectedReport.Chief_Complaint_EN}</p>
+                                    <p><strong>Priority:</strong> {selectedReport.Triage_Priority_Score}</p>
+                                    <p className="mb-1"><strong>Symptoms:</strong></p>
+                                    <ul className="list-group list-group-flush mb-2">
+                                        {selectedReport.Structured_Symptom_List.map((symptom, i) => <li className="list-group-item py-1" key={i}>{symptom}</li>)}
+                                    </ul>
+                                    <p><strong>AI Rationale:</strong> {selectedReport.AI_Rationale}</p>
+                                </div>
+                            </div>
+
+                            <div className="card">
+                                <div className="card-body">
+                                    <h5 className="card-title">AI-Powered Analysis</h5>
+                                    {analysis.isLoading && (
+                                        <div className="d-flex align-items-center">
+                                            <strong>Generating analysis...</strong>
+                                            <div className="spinner-border ms-auto" role="status" aria-hidden="true"></div>
+                                        </div>
+                                    )}
+                                    {analysis.error && <div className="alert alert-danger">{analysis.error}</div>}
+                                    {analysis.data && (
+                                        <div>
+                                            <h6>Urgency Assessment</h6>
+                                            <p>{analysis.data.urgency_assessment}</p>
+
+                                            <h6>Differential Diagnosis</h6>
+                                            <ul className="list-group mb-3">
+                                                {analysis.data.differential_diagnosis.map((d, i) => (
+                                                    <li className="list-group-item" key={i}>
+                                                        <strong>{d.condition}</strong> (Probability: {d.probability})
+                                                        <p className="mb-0 text-muted small">{d.rationale}</p>
+                                                    </li>
+                                                ))}
+                                            </ul>
+
+                                            <h6>Recommended Next Steps</h6>
+                                            <ul className="list-group">
+                                                {analysis.data.recommended_next_steps.map((step, i) => <li className="list-group-item" key={i}>{step}</li>)}
+                                            </ul>
+                                        </div>
                                     )}
                                 </div>
-                             )}
-                        </>
-                    ) : <p>Select a report to view details.</p>}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </main>
         </div>
     );
 };
 
-const App = () => {
-    const [userRole, setUserRole] = useState(null); // 'patient', 'doctor', or null
-    const [reports, setReports] = useState([]);
 
-    const handleLogin = (role) => setUserRole(role);
-    const handleLogout = () => {
-        setUserRole(null);
-        // Optional: clear reports on logout if desired
-        // setReports([]); 
-    };
+// --- Main App Component ---
+const App = () => {
+    const [userType, setUserType] = useState(null); // 'patient', 'doctor', or null for login
+    const [triageReports, setTriageReports] = useState([]);
+
+    const handleLogin = (type) => setUserType(type);
+    const handleLogout = () => setUserType(null);
 
     const handleTriageComplete = (report) => {
-        setReports(prev => [...prev, report]);
-        alert(`Triage complete! Your ID is ${report.Triage_ID}. Please provide this to the clinic.`);
-        setUserRole('doctor'); // Switch to doctor view to show the new report
+        setTriageReports(prevReports => [...prevReports, report]);
+        // For a real app, this would be saved to a backend.
+        // After completion, we can log the "patient" out to return to the main screen.
+        setUserType(null);
+        alert(`Triage report ${report.Triage_ID} submitted successfully! A doctor will review it shortly.`);
+    };
+    
+    // Add some mock data for demonstration purposes
+    useEffect(() => {
+        setTriageReports([
+            {
+                "Triage_ID": "TR-DEMO-001",
+                "Patient_Language_Used": "English",
+                "Chief_Complaint_EN": "Severe headache and dizziness",
+                "Triage_Priority_Score": "HIGH",
+                "Structured_Symptom_List": ["Sudden onset of severe headache", "Dizziness and lightheadedness", "Nausea", "Sensitivity to light"],
+                "AI_Rationale": "The combination of a sudden, severe headache with neurological symptoms like dizziness suggests a potentially serious condition that requires immediate medical attention."
+            },
+            {
+                "Triage_ID": "TR-DEMO-002",
+                "Patient_Language_Used": "English",
+                "Chief_Complaint_EN": "Sore throat and cough",
+                "Triage_Priority_Score": "LOW",
+                "Structured_Symptom_List": ["Scratchy throat for 2 days", "Dry cough, especially at night", "No fever", "General fatigue"],
+                "AI_Rationale": "Symptoms are consistent with a common upper respiratory viral infection. The absence of fever and severe symptoms lowers the priority. Self-care and monitoring are appropriate."
+            }
+        ]);
+    }, []);
+
+    const renderContent = () => {
+        switch (userType) {
+            case 'patient':
+                return <PatientView onTriageComplete={handleTriageComplete} onLogout={handleLogout} />;
+            case 'doctor':
+                return <DoctorView reports={triageReports} onLogout={handleLogout} />;
+            default:
+                return <LoginScreen onLogin={handleLogin} />;
+        }
     };
 
-    if (!userRole) {
-        return <LoginScreen onLogin={handleLogin} />;
-    }
-
-    if (userRole === 'patient') {
-        return <PatientView onTriageComplete={handleTriageComplete} onLogout={handleLogout} />;
-    }
-
-    if (userRole === 'doctor') {
-        return <DoctorView reports={reports} onLogout={handleLogout} />;
-    }
-
-    return null;
+    return (
+        <div className="vh-100 d-flex flex-column">
+            {renderContent()}
+        </div>
+    );
 };
 
-const root = createRoot(document.getElementById('root'));
+const container = document.getElementById('root');
+const root = createRoot(container!);
 root.render(<App />);
