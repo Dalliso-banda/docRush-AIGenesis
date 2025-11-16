@@ -102,6 +102,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
     const [isSessionActive, setIsSessionActive] = useState(false);
     const [statusText, setStatusText] = useState('Click below to start your triage conversation.');
     const [micVolume, setMicVolume] = useState(0);
+    const [micPermission, setMicPermission] = useState('idle'); // 'idle', 'prompting', 'granted', 'denied'
     const sessionPromiseRef = useRef<Promise<any> | null>(null);
     const outputAudioContextRef = useRef<AudioContext | null>(null);
     const nextStartTimeRef = useRef(0);
@@ -211,6 +212,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
             streamRef.current = null;
         }
         setIsSessionActive(false);
+        setMicPermission('idle');
         setStatusText('Session ended. Click below to start a new triage conversation.');
     }, []);
 
@@ -219,6 +221,19 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
     }, [isSessionActive, audioCleanup]);
 
     const handleStartAudioTriage = async () => {
+        // 1. Request microphone permission BEFORE connecting to the service
+        setMicPermission('prompting');
+        try {
+            const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            streamRef.current = mediaStream;
+            setMicPermission('granted');
+        } catch (err) {
+            console.error("Microphone access denied:", err);
+            setMicPermission('denied');
+            return; // Stop execution if permission is denied
+        }
+
+        // 2. If permission is granted, proceed to connect
         setTranscript([]);
         setStatusText('Connecting...');
         setIsSessionActive(true);
@@ -257,11 +272,10 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
             sessionPromiseRef.current = ai.live.connect({
                 model: 'gemini-2.5-flash-native-audio-preview-09-2025',
                 callbacks: {
-                    onopen: async () => {
+                    onopen: () => {
                         setStatusText('Microphone active. Please start speaking.');
                         inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-                        streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-                        mediaStreamSourceRef.current = inputAudioContextRef.current.createMediaStreamSource(streamRef.current);
+                        mediaStreamSourceRef.current = inputAudioContextRef.current.createMediaStreamSource(streamRef.current!);
                         scriptProcessorRef.current = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
                         
                         scriptProcessorRef.current.onaudioprocess = (audioProcessingEvent) => {
@@ -317,7 +331,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                             currentInputTranscription = '';
                             currentOutputTranscription = '';
                         }
-                        const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData.data;
+                        const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
                         if (base64Audio && outputAudioContextRef.current) {
                             nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputAudioContextRef.current.currentTime);
                             const audioBuffer = await decodeAudioData(decode(base64Audio), outputAudioContextRef.current, 24000, 1);
@@ -353,7 +367,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
 
         } catch (err) {
             console.error("Error starting triage:", err);
-            alert("Could not start the triage session. Please ensure microphone permissions are granted and try again.");
+            setStatusText('Could not connect to the triage service. Please try again.');
             audioCleanup();
         }
     };
@@ -436,7 +450,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
 
             setTranscript(prev => [...prev, userMessage]);
 
-            const response = await chatSessionRef.current!.sendMessage({ message: parts });
+            const response = await chatSessionRef.current!.sendMessage({ message: { parts } });
             
             if (response.functionCalls) {
                 for(const fc of response.functionCalls) {
@@ -492,7 +506,28 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                 <h3>Conversational Triage</h3>
                 <p>Describe your symptoms by speaking to our AI assistant.</p>
                 {locationError && <p className="text-danger small">{locationError}</p>}
-                <button className="btn btn-primary btn-lg" onClick={handleStartAudioTriage}>Start Audio Triage</button>
+                
+                {micPermission === 'denied' && (
+                    <div className="alert alert-warning my-3">
+                        <p className="fw-bold mb-1">Microphone Access Required</p>
+                        <p className="mb-0 small">You've denied microphone access. Please enable it in your browser's site settings to use audio triage, then click start again.</p>
+                    </div>
+                )}
+
+                <button 
+                    className="btn btn-primary btn-lg" 
+                    onClick={handleStartAudioTriage}
+                    disabled={micPermission === 'prompting'}
+                >
+                    {micPermission === 'prompting' ? (
+                        <>
+                            <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            <span className="ms-2">Initializing...</span>
+                        </>
+                    ) : (
+                        'Start Audio Triage'
+                    )}
+                </button>
                 <button className="btn btn-link mt-2" onClick={() => setTriageMode('start')}>Back</button>
             </div>
         ) : (
