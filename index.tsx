@@ -38,29 +38,6 @@ async function decodeAudioData(data, ctx, sampleRate, numChannels) {
     return buffer;
 }
 
-const resampleBuffer = (audioBuffer: AudioBuffer, targetSampleRate: number): Float32Array => {
-    const inputData = audioBuffer.getChannelData(0);
-    const inputSampleRate = audioBuffer.sampleRate;
-
-    if (inputSampleRate === targetSampleRate) {
-        return inputData;
-    }
-
-    const ratio = inputSampleRate / targetSampleRate;
-    const outputLength = Math.floor(inputData.length / ratio);
-    const result = new Float32Array(outputLength);
-
-    for (let i = 0; i < outputLength; i++) {
-        const index = i * ratio;
-        const before = Math.floor(index);
-        const after = Math.min(before + 1, inputData.length - 1);
-        const atPoint = index - before;
-        result[i] = inputData[before] + (inputData[after] - inputData[before]) * atPoint;
-    }
-
-    return result;
-};
-
 const fileToDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -221,6 +198,14 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
     }, [isSessionActive, audioCleanup]);
 
     const handleStartAudioTriage = async () => {
+        // 0. Check for browser support
+        if (!navigator.mediaDevices?.getUserMedia) {
+            console.error('`navigator.mediaDevices.getUserMedia` is not available.');
+            setMicPermission('denied');
+            // The render logic will show a generic "access required" message which is sufficient.
+            return;
+        }
+
         // 1. Request microphone permission BEFORE connecting to the service
         setMicPermission('prompting');
         try {
@@ -274,14 +259,16 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                 callbacks: {
                     onopen: () => {
                         setStatusText('Microphone active. Please start speaking.');
-                        inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+                        // Create context with target sample rate of 16000, the browser will handle resampling.
+                        inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
                         mediaStreamSourceRef.current = inputAudioContextRef.current.createMediaStreamSource(streamRef.current!);
                         scriptProcessorRef.current = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
                         
                         scriptProcessorRef.current.onaudioprocess = (audioProcessingEvent) => {
-                            const resampledData = resampleBuffer(audioProcessingEvent.inputBuffer, 16000);
+                            // The input buffer is now already at 16000Hz.
+                            const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
                             const pcmBlob: Blob = {
-                                data: encode(new Uint8Array(new Int16Array(resampledData.map(x => x * 32768)).buffer)),
+                                data: encode(new Uint8Array(new Int16Array(inputData.map(x => x * 32768)).buffer)),
                                 mimeType: 'audio/pcm;rate=16000',
                             };
                             sessionPromiseRef.current?.then((session) => {
@@ -510,7 +497,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
                 {micPermission === 'denied' && (
                     <div className="alert alert-warning my-3">
                         <p className="fw-bold mb-1">Microphone Access Required</p>
-                        <p className="mb-0 small">You've denied microphone access. Please enable it in your browser's site settings to use audio triage, then click start again.</p>
+                        <p className="mb-0 small">You've denied microphone access or your browser does not support it. Please enable it in your browser's site settings to use audio triage, then click start again.</p>
                     </div>
                 )}
 
