@@ -3,6 +3,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type, Modality, LiveServerMessage, Blob, FunctionDeclaration, Chat } from '@google/genai';
 import { jsPDF } from 'jspdf';
+import 'bootstrap/dist/css/bootstrap.min.css';
+import LandingPage from './src/assets/landingPage';
+import { BrowserRouter, createBrowserRouter, Navigate, Route, Router, RouterProvider, Routes } from 'react-router-dom';
 
 // --- Helper Functions ---
 function encode(bytes) {
@@ -56,7 +59,7 @@ const LoginScreen = ({ onLogin }) => (
             <h1 className="h4 m-0">Doc Rush</h1>
         </div>
         <main className="card-body d-flex flex-column justify-content-center align-items-center text-center">
-            <h2 className="display-5">Welcome to Doc Rush</h2>
+            <h2 className="display-5 text-dark">Welcome to Doc Rush</h2>
             <p className="lead">Your AI-powered medical triage assistant.</p>
             <div className="mt-3 d-flex flex-wrap justify-content-center gap-2">
                 <button className="btn btn-primary btn-lg px-4 py-2" onClick={() => onLogin('patient')}>I'm a Patient</button>
@@ -1052,12 +1055,27 @@ const App = () => {
     };
 
     return (
-        <div className="vh-100 d-flex flex-column">
+        <div className=" vh-100 vw-100 d-flex flex-column" style={{backgroundColor: '#f8f9fa  !important'}}>
             {renderContent()}
         </div>
     );
 };
 
+// 3. Define the root App component with routing
+const router: React.FC = createBrowserRouter([
+    {
+        path: "/",
+        element: <LandingPage />,
+    },
+    {
+        path: "/app",
+        element: <App />,
+    }
+])
+
+
+// 4. Render the new router component
 const container = document.getElementById('root');
 const root = createRoot(container!);
-root.render(<App />);
+
+root.render(<RouterProvider router={router}></RouterProvider>);

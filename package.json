@@ -9,10 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^19.2.0",
     "@google/genai": "^1.29.1",
+    "@popperjs/core": "^2.11.8",
+    "bootstrap": "^5.3.8",
+    "jspdf": "^2.5.1",
+    "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "jspdf": "^2.5.1"
+    "react-router-dom": "^7.9.6"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
