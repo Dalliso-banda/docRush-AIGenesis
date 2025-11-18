@@ -8,8 +8,7 @@ export default defineConfig(({ mode }) => {
     return {
       // 1. ADD BASE AND APP TYPE
       base: './', 
-      appType: 'mpa', // <--- Disables SPA fallback for dev server
-      
+    
       server: {
         port: 3000,
         host: '0.0.0.0',
@@ -25,7 +24,7 @@ export default defineConfig(({ mode }) => {
         rollupOptions: {
           input: {
             main: path.resolve(__dirname, 'index.html'),
-            demo: path.resolve(__dirname, 'demo.html'), 
+      
           },
         },
       },
