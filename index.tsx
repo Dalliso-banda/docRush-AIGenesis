@@ -1,11 +1,10 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type, Modality, LiveServerMessage, Blob, FunctionDeclaration, Chat } from '@google/genai';
 import { jsPDF } from 'jspdf';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import LandingPage from './src/assets/landingPage';
-import { BrowserRouter, createBrowserRouter, Navigate, Route, Router, RouterProvider, Routes } from 'react-router-dom';
+import LandingPage from './src/assets/landingPage.tsx';
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 
 // --- Helper Functions ---
 function encode(bytes) {
@@ -50,6 +49,26 @@ const fileToDataUrl = (file: File): Promise<string> => new Promise((resolve, rej
 
 const dataUrlToBase64 = (dataUrl: string) => dataUrl.split(',')[1];
 
+// --- Static Constants ---
+// Moved outside component to prevent recreation on every render
+const triageSchema = {
+    type: Type.OBJECT,
+    properties: {
+        Triage_ID: { type: Type.STRING },
+        Patient_Language_Used: { type: Type.STRING },
+        Chief_Complaint_EN: { type: Type.STRING },
+        Triage_Priority_Score: { type: Type.STRING, enum: ['HIGH', 'MEDIUM', 'LOW'] },
+        Structured_Symptom_List: { type: Type.ARRAY, items: { type: Type.STRING } },
+        AI_Rationale: { type: Type.STRING },
+    },
+    required: ['Triage_ID', 'Patient_Language_Used', 'Chief_Complaint_EN', 'Triage_Priority_Score', 'Structured_Symptom_List', 'AI_Rationale']
+};
+
+const submitTriageReportFunctionDeclaration: FunctionDeclaration = {
+    name: 'submitTriageReport',
+    description: 'Submits the final triage report once all necessary information has been gathered from the patient.',
+    parameters: triageSchema
+};
 
 // --- Components ---
 
@@ -59,7 +78,7 @@ const LoginScreen = ({ onLogin }) => (
             <h1 className="h4 m-0">Doc Rush</h1>
         </div>
         <main className="card-body d-flex flex-column justify-content-center align-items-center text-center">
-            <h2 className="display-5 text-dark">Welcome to Doc Rush</h2>
+            <h2 className="display-5">Welcome to Doc Rush</h2>
             <p className="lead">Your AI-powered medical triage assistant.</p>
             <div className="mt-3 d-flex flex-wrap justify-content-center gap-2">
                 <button className="btn btn-primary btn-lg px-4 py-2" onClick={() => onLogin('patient')}>I'm a Patient</button>
@@ -103,7 +122,10 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
 
 
     const scrollToBottom = () => {
-        transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        // Use rAF to avoid layout thrashing and potential freezes during rapid updates
+        requestAnimationFrame(() => {
+             transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        });
     };
 
     useEffect(() => {
@@ -130,32 +152,13 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
         }
     }, []);
 
-
-    // Common triage function declaration
-    const triageSchema = {
-        type: Type.OBJECT,
-        properties: {
-            Triage_ID: { type: Type.STRING },
-            Patient_Language_Used: { type: Type.STRING },
-            Chief_Complaint_EN: { type: Type.STRING },
-            Triage_Priority_Score: { type: Type.STRING, enum: ['HIGH', 'MEDIUM', 'LOW'] },
-            Structured_Symptom_List: { type: Type.ARRAY, items: { type: Type.STRING } },
-            AI_Rationale: { type: Type.STRING },
-        },
-        required: ['Triage_ID', 'Patient_Language_Used', 'Chief_Complaint_EN', 'Triage_Priority_Score', 'Structured_Symptom_List', 'AI_Rationale']
-    };
-    const submitTriageReportFunctionDeclaration: FunctionDeclaration = {
-        name: 'submitTriageReport',
-        description: 'Submits the final triage report once all necessary information has been gathered from the patient.',
-        parameters: triageSchema
-    };
-
-    const handleTriageSubmit = (args: any) => {
+    const handleTriageSubmit = useCallback((args: any) => {
         setIsLoading(true);
         setStatusText('Triage complete. Generating report...');
-        if (triageMode === 'audio') audioCleanup();
+        // If in audio mode, cleanup will be handled by effect when unmounting or changing state,
+        // but we can trigger local cleanup here if needed.
         onTriageComplete(args);
-    };
+    }, [onTriageComplete]);
 
     // --- Audio Triage Logic ---
     const audioCleanup = useCallback(() => {
@@ -402,11 +405,15 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
         } finally {
             setIsChatLoading(false);
         }
-    }, [submitTriageReportFunctionDeclaration, userLocation]);
+    }, [userLocation]); // Dependencies are now stable
 
     useEffect(() => {
         if (triageMode === 'chat' && !chatSessionRef.current) {
             initializeChat();
+        }
+        // Reset chat session if leaving chat mode to ensure fresh start on return
+        if (triageMode !== 'chat') {
+            chatSessionRef.current = null;
         }
     }, [triageMode, initializeChat]);
 
@@ -414,7 +421,7 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
         const text = chatInputText.trim();
         const imageFile = chatInputImage;
 
-        if (!text && !imageFile) return;
+        if ((!text && !imageFile) || isChatLoading) return;
 
         setIsChatLoading(true);
         setChatInputText('');
@@ -440,7 +447,13 @@ const PatientView = ({ onTriageComplete, onLogout }) => {
 
             setTranscript(prev => [...prev, userMessage]);
 
-            const response = await chatSessionRef.current!.sendMessage({ message: { parts } });
+            if (!chatSessionRef.current) {
+                // Should not happen if initialized, but safety check
+                 setTranscript(prev => [...prev, { speaker: 'ai', text: "Error: Session not active." }]);
+                 return;
+            }
+
+            const response = await chatSessionRef.current.sendMessage({ message: parts });
             
             if (response.functionCalls) {
                 for(const fc of response.functionCalls) {
@@ -1055,27 +1068,44 @@ const App = () => {
     };
 
     return (
-        <div className=" vh-100 vw-100 d-flex flex-column" style={{backgroundColor: '#f8f9fa  !important'}}>
+        <div className="vh-100 d-flex flex-column">
             {renderContent()}
         </div>
     );
 };
-
 // 3. Define the root App component with routing
+
 const router: React.FC = createBrowserRouter([
+
     {
+
         path: "/",
+
         element: <LandingPage />,
+
     },
+
     {
+
         path: "/app",
+
         element: <App />,
+
     }
+
 ])
 
 
+
+
+
 // 4. Render the new router component
+
 const container = document.getElementById('root');
+
 const root = createRoot(container!);
 
+
+
 root.render(<RouterProvider router={router}></RouterProvider>);
+
